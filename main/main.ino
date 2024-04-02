@@ -27,6 +27,11 @@ void setup() {
 	rearDiff.attach(rearDiffPin, 1000, 2000);
 	shifter.attach(shifterPin, 1000, 2000);
 
+  // zero all servos
+  frontDiff.write(0);
+	rearDiff.write(0);
+	shifter.write(0);
+
 void loop() {
 
 }
