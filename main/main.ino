@@ -24,6 +24,9 @@ Servo shifter;
 #define PWM_SRC_1 1
 #define PWM_SRC_2 2
 
+#define High_PWM_Trigger 0.7
+#define Low_PWM_Trigger 0.3
+
 // PWM
 volatile std::array<unsigned long, 2> isrPulsewidth = {0, 0};     // Define Interrupt Service Routine (ISR) pulsewidth
 unsigned std::array<long, 2> pulseWidth = {0, 0};                 // Define Pulsewidth variable
@@ -40,10 +43,12 @@ void calcPulsewidth_src1()
   if (digitalRead(INPUT_PIN) == HIGH)    // If the change was a RISING edge
   {
     pulseStartTime_src_1 = micros();           // Store the start time (in microseconds)
+    lastState_src_1 = {true};
   }
   else                                   // If the change was a FALLING edge
   {        
     isrPulsewidth[0] = micros() - pulseStartTime_src_1;    // Calculate the pulsewidth
+    lastState_src_1 = {false};
   }
 }
 
@@ -139,6 +144,12 @@ void servo_handler(void){
   }
 }
 
+void send_signal_to_thread(uint8_t signal){
+  global_mutex.lock();
+  global_signal = signal;
+global_mutex.unlock();
+}
+
 void setup() {
   // Allow allocation of all timers
 	ESP32PWM::allocateTimer(0);
@@ -163,8 +174,40 @@ void setup() {
   
 }
 void loop() {
+  // interupt safe
   noInterrupts();                         // Turn off interrupts
   pulseWidth = isrPulsewidth;             // Copy the isr pulsewidth to the pulsewidth variable
   interrupts();                           // Turn on interrupts
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+  if (pulseWidth[1] >= High_PWM_Trigger || pulseWidth[1] <= Low_PWM_Trigger){
+    // trigger control for second core
+    uint8_t selector = uint8_t(std::floor(pulseWidth[0] * 10)
+    if (selector > 0 && selector <= 3){
+      if (pulseWidth[1] >= High_PWM_Trigger){
+        send_signal_to_thread(0x00000002);
+      }
+      else {
+        send_signal_to_thread(0x00000001);
+      }
+    }
+    else if (selector > 3 && selector <= 6){
+      if (pulseWidth[1] >= High_PWM_Trigger){
+        send_signal_to_thread(0x00000020);
+      }
+      else {
+        send_signal_to_thread(0x00000010);
+      }
+    }
+    else if (selector > 6 && selector <= 9){
+      if (pulseWidth[1] >= High_PWM_Trigger){
+        send_signal_to_thread(0x00000200);
+      }
+      else {
+        send_signal_to_thread(0x00000100);
+      }
+    }
+
+  }
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
 }
