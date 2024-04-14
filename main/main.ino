@@ -7,25 +7,28 @@
 
 // front diff object
 Servo frontDiff;
-#define frontDiffPin 1
+#define frontDiffPin 14
 
 // rear diff object
 Servo rearDiff;
-#define rearDiffPin 2
+#define rearDiffPin 12
 
 // shifter object
 Servo shifter;
-#define shifterPin 3
+#define shifterPin 13
 
-#define servo_triggered 90
-#define servo_centured 0
+#define servo_triggered 180
+#define servo_centured 90
 #define hex_size 4
 
-#define PWM_SRC_1 1
-#define PWM_SRC_2 2
+#define PWM_SRC_1 27
+#define PWM_SRC_2 26
 
-#define High_PWM_Trigger 0.7
-#define Low_PWM_Trigger 0.3
+#define High_PWM_Trigger 1700
+#define Low_PWM_Trigger 1300
+#define SIGNAL_STEP_SIZE 50
+
+#define SERVO_PWM_CENTURE 500
 
 // PWM
 std::mutex pwm_lock_src_1, pwm_lock_src_2;
@@ -82,6 +85,7 @@ void handle_signal(uint32_t signal){
   /*############################################################################*/
   if ((signal & 0x0000000F) != 0x00000000){
     uint8_t value = uint8_t(signal & 0x0000000F);
+    Serial.println("front diff value: " + String(value));
     switch (value) {
       case 1:
         frontDiff.write(servo_triggered);
@@ -96,8 +100,9 @@ void handle_signal(uint32_t signal){
   /*############################################################################*/
   /*#                           rear diff control                              #*/
   /*############################################################################*/
-  if ((signal & 0x000000F0) == 0x00000000){
+  if ((signal & 0x000000F0) != 0x00000000){
     uint8_t value = uint8_t((signal & 0x000000F0) >> (1 * hex_size));
+    Serial.println("rear diff value: " + String(value));
     switch (value) {
       case 1:
         rearDiff.write(servo_triggered);
@@ -105,7 +110,7 @@ void handle_signal(uint32_t signal){
       case 2:
         rearDiff.write(servo_centured);
         break;
-      default:
+      default:  
         break;
     }
     signal = signal & !0x000000F0;
@@ -113,8 +118,9 @@ void handle_signal(uint32_t signal){
   /*############################################################################*/
   /*#                             shifter control                              #*/
   /*############################################################################*/
-  if ((signal & 0x00000F00) == 0x00000000){
+  if ((signal & 0x00000F00) != 0x00000000){
     uint8_t value = uint8_t((signal & 0x00000F00) >> (2 * hex_size));
+    Serial.println("Shifter value: " + String(value));
     switch (value) {
       case 1:
         shifter.write(servo_triggered);
@@ -159,23 +165,29 @@ void setup() {
 	ESP32PWM::allocateTimer(1);
 	ESP32PWM::allocateTimer(2); 
 	Serial.begin(115200);
-	frontDiff.setPeriodHertz(330);      // Standard 50hz servo
-	rearDiff.setPeriodHertz(330);      // Standard 50hz servo
-	shifter.setPeriodHertz(330);      // Standard 50hz servo
+	frontDiff.setPeriodHertz(60);      // Standard 50hz servo
+	rearDiff.setPeriodHertz(60);      // Standard 50hz servo
+	shifter.setPeriodHertz(60);      // Standard 50hz servo
 
   frontDiff.attach(frontDiffPin, 1000, 2000);
 	rearDiff.attach(rearDiffPin, 1000, 2000);
 	shifter.attach(shifterPin, 1000, 2000);
 
   // zero all servos
-  frontDiff.write(0);
-	rearDiff.write(0);
-	shifter.write(0);
+  frontDiff.write(90);
+	rearDiff.write(90);
+	shifter.write(90);
 
   attachInterrupt(digitalPinToInterrupt(PWM_SRC_1), calcPulsewidth_src1, CHANGE);   // Run the calcPulsewidth function on signal CHANGE
   attachInterrupt(digitalPinToInterrupt(PWM_SRC_2), calcPulsewidth_src2, CHANGE);   // Run the calcPulsewidth function on signal CHANGE
   
 }
+
+/*
++Ve = 6v
+Signal voltage = 3.3v
+
+*/
 void loop() {
   // interupt safe
   noInterrupts();                         // Turn off interrupts
@@ -185,10 +197,13 @@ void loop() {
   pwm_lock_src_1.unlock();
   pwm_lock_src_2.unlock();
   interrupts();                           // Turn on interrupts
-
+  Serial.print(pulseWidth[0] - 1000);
+  Serial.print(" ");
+  Serial.println(pulseWidth[1] - 1000);
   if (pulseWidth[1] >= High_PWM_Trigger || pulseWidth[1] <= Low_PWM_Trigger){
     // trigger control for second core
-    uint8_t selector = uint8_t(std::floor(pulseWidth[0] * 10));
+    
+    uint8_t selector = uint8_t((pulseWidth[0]  - 1000)/100);
     if (selector > 0 && selector <= 3){
       if (pulseWidth[1] >= High_PWM_Trigger){
         handle_signal(0x00000002);
