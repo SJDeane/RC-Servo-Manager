@@ -7,28 +7,34 @@
 
 // front diff object
 Servo frontDiff;
-#define frontDiffPin 14
+#define frontDiffPin 27
 
 // rear diff object
 Servo rearDiff;
-#define rearDiffPin 12
+#define rearDiffPin 26
 
 // shifter object
 Servo shifter;
-#define shifterPin 13
+#define shifterPin 25
 
-#define servo_triggered 180
+#define servo_triggered 170
 #define servo_centured 90
 #define hex_size 4
 
-#define PWM_SRC_1 27
-#define PWM_SRC_2 26
+#define PWM_SRC_1 17
+#define PWM_SRC_2 16
 
 #define High_PWM_Trigger 1700
 #define Low_PWM_Trigger 1300
 #define SIGNAL_STEP_SIZE 50
 
-#define SERVO_PWM_CENTURE 500
+#define SERVO_PWM_CENTURE 475
+
+/* Signal control points */
+#define BOTH_DIFF_POINT -1
+#define FRONT_DIFF_POINT 1
+#define REAR_DIFF_POINT 3
+#define SHIFTER_POINT 5
 
 // PWM
 std::mutex pwm_lock_src_1, pwm_lock_src_2;
@@ -88,14 +94,14 @@ void handle_signal(uint32_t signal){
     Serial.println("front diff value: " + String(value));
     switch (value) {
       case 1:
-        frontDiff.write(servo_triggered);
+        frontDiff.write(155);
         break;
       case 2:
-        frontDiff.write(servo_centured);
+        frontDiff.write(105);
       default:
         break;
     }
-    signal = signal & !0x0000000F;
+    // signal = signal & !0x0000000F;
   }
   /*############################################################################*/
   /*#                           rear diff control                              #*/
@@ -105,15 +111,15 @@ void handle_signal(uint32_t signal){
     Serial.println("rear diff value: " + String(value));
     switch (value) {
       case 1:
-        rearDiff.write(servo_triggered);
+        rearDiff.write(155);
         break;
       case 2:
-        rearDiff.write(servo_centured);
+        rearDiff.write(105);
         break;
       default:  
         break;
     }
-    signal = signal & !0x000000F0;
+    // signal = signal & !0x000000F0;
   }
   /*############################################################################*/
   /*#                             shifter control                              #*/
@@ -133,7 +139,7 @@ void handle_signal(uint32_t signal){
     }
     /*############################################################################*/
   }
-  signal = signal & !0x00000F00;
+  signal = signal & !0x00000FFF;
 }
 
 // Servo handler thread will control the position of all of the servos
@@ -165,17 +171,17 @@ void setup() {
 	ESP32PWM::allocateTimer(1);
 	ESP32PWM::allocateTimer(2); 
 	Serial.begin(115200);
-	frontDiff.setPeriodHertz(60);      // Standard 50hz servo
-	rearDiff.setPeriodHertz(60);      // Standard 50hz servo
-	shifter.setPeriodHertz(60);      // Standard 50hz servo
+	frontDiff.setPeriodHertz(50);      // Standard 50hz servo
+	rearDiff.setPeriodHertz(50);      // Standard 50hz servo
+	shifter.setPeriodHertz(50);      // Standard 50hz servo
 
   frontDiff.attach(frontDiffPin, 1000, 2000);
 	rearDiff.attach(rearDiffPin, 1000, 2000);
 	shifter.attach(shifterPin, 1000, 2000);
 
   // zero all servos
-  frontDiff.write(90);
-	rearDiff.write(90);
+  frontDiff.write(105);
+	rearDiff.write(105);
 	shifter.write(90);
 
   attachInterrupt(digitalPinToInterrupt(PWM_SRC_1), calcPulsewidth_src1, CHANGE);   // Run the calcPulsewidth function on signal CHANGE
@@ -203,8 +209,10 @@ void loop() {
   if (pulseWidth[1] >= High_PWM_Trigger || pulseWidth[1] <= Low_PWM_Trigger){
     // trigger control for second core
     
-    uint8_t selector = uint8_t((pulseWidth[0]  - 1000)/100);
-    if (selector > 0 && selector <= 3){
+    unsigned long selector = ((pulseWidth[0]  - 1000));
+    Serial.println("Range 1: " + String(selector > 525) + "-" + String(selector <= 575) + "\t selector value: " + String(selector));
+    if ((selector > (SERVO_PWM_CENTURE + (SIGNAL_STEP_SIZE * FRONT_DIFF_POINT))) && (selector <= (SERVO_PWM_CENTURE + (SIGNAL_STEP_SIZE * (FRONT_DIFF_POINT + 1))))){
+      // Serial.println("Front Diff");
       if (pulseWidth[1] >= High_PWM_Trigger){
         handle_signal(0x00000002);
       }
@@ -212,20 +220,32 @@ void loop() {
         handle_signal(0x00000001);
       }
     }
-    else if (selector > 3 && selector <= 6){
+    else if (selector > (SERVO_PWM_CENTURE + (SIGNAL_STEP_SIZE * REAR_DIFF_POINT)) && selector <= (SERVO_PWM_CENTURE + (SIGNAL_STEP_SIZE * (REAR_DIFF_POINT + 1)))){
+      Serial.println("Rear Diff");
       if (pulseWidth[1] >= High_PWM_Trigger){
+        
         handle_signal(0x00000020);
       }
       else {
         handle_signal(0x00000010);
       }
     }
-    else if (selector > 6 && selector <= 9){
+    else if (selector > (SERVO_PWM_CENTURE + (SIGNAL_STEP_SIZE * SHIFTER_POINT)) && selector <= (SERVO_PWM_CENTURE + (SIGNAL_STEP_SIZE * (SHIFTER_POINT + 1)))){
+      // Serial.println("Shifter");
       if (pulseWidth[1] >= High_PWM_Trigger){
         handle_signal(0x00000200);
       }
       else {
         handle_signal(0x00000100);
+      }
+    }
+    else if (selector > (SERVO_PWM_CENTURE + (SIGNAL_STEP_SIZE * BOTH_DIFF_POINT)) && selector <= (SERVO_PWM_CENTURE + (SIGNAL_STEP_SIZE * (BOTH_DIFF_POINT + 1)))){
+      // Serial.println("Both Diffs");
+      if (pulseWidth[1] >= High_PWM_Trigger){
+        handle_signal(0x00000022);
+      }
+      else {
+        handle_signal(0x00000011);
       }
     }
 
