@@ -164,13 +164,16 @@ void handle_signal(uint32_t signal) {
 // }
 
 /************************ Wifi control ************************/
-
-const char* wifi_name = "ESP32-Access-Point";
+#define TIME_NOW_MS millis()
+#define HTML_DEMAND_WAIT_TIME 500//ms
+const char* wifi_name = "RC-Car-Manager";
 const char* password = "123456789";
 WiFiServer server(80);
 bool client_connected = false;
 WiFiClient client;
 String currentLine = "";
+uint32_t html_demand = 0x00000000;
+uint64_t last_demand = TIME_NOW_MS;
 
 String HTML_print(String message){
   return "<p>" + message + "</p>";
@@ -179,9 +182,13 @@ String Add_HTML_Button(String message, String active_message, uint position){
   return "<form id='F" + String(position) + "' action='" + active_message + "'><input class='button' type='submit' value='" + message + "' ></form><br>";
 }
 
+String Add_HTML_Toggle(String message, String active_message, uint position){
+  return "<form id='F" + String(position) + "' action='" + active_message + "'><input class='slider round' type='checkbox' value='" + message + "' ></form><br>";
+}
+
 
 String header = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n";
-String html_1 = "<!DOCTYPE html><html><head><title>LED Control</title></head><body><div id='main'><h2>LED Control</h2>";
+String html_1 = "<!DOCTYPE html><html><head><title>RC Crawler control page</title></head><body><div id='main'><h2>RC Crawler control page</h2>";
 String html_4 = "</div></body></html>";
 
 /************************ Main ************************/
@@ -239,31 +246,39 @@ void loop() {
     if ((selector > (SERVO_PWM_CENTURE + (SIGNAL_STEP_SIZE * FRONT_DIFF_POINT))) && (selector <= (SERVO_PWM_CENTURE + (SIGNAL_STEP_SIZE * (FRONT_DIFF_POINT + 1))))) {
       // Serial.println("Front Diff");
       if (pulseWidth[1] >= High_PWM_Trigger) {
-        handle_signal(0x00000002);
+        // handle_signal(0x00000002);
+        html_demand = (html_demand & 0xfffffff0) | 0x00000002;
       } else {
-        handle_signal(0x00000001);
+        // handle_signal(0x00000001);
+        html_demand = (html_demand & 0xfffffff0) | 0x00000001;
       }
     } else if (selector > (SERVO_PWM_CENTURE + (SIGNAL_STEP_SIZE * REAR_DIFF_POINT)) && selector <= (SERVO_PWM_CENTURE + (SIGNAL_STEP_SIZE * (REAR_DIFF_POINT + 1)))) {
       Serial.println("Rear Diff");
       if (pulseWidth[1] >= High_PWM_Trigger) {
 
-        handle_signal(0x00000020);
+        // handle_signal(0x00000020);
+        html_demand = (html_demand & 0xffffff0f) | 0x00000020;
       } else {
-        handle_signal(0x00000010);
+        // handle_signal(0x00000010);
+        html_demand = (html_demand & 0xffffff0f) | 0x00000010;
       }
     } else if (selector > (SERVO_PWM_CENTURE + (SIGNAL_STEP_SIZE * SHIFTER_POINT)) && selector <= (SERVO_PWM_CENTURE + (SIGNAL_STEP_SIZE * (SHIFTER_POINT + 1)))) {
       // Serial.println("Shifter");
       if (pulseWidth[1] >= High_PWM_Trigger) {
-        handle_signal(0x00000200);
+        // handle_signal(0x00000200);
+        html_demand = (html_demand & 0xfffff0ff) | 0x00000200;
       } else {
-        handle_signal(0x00000100);
+        // handle_signal(0x00000100);
+        html_demand = (html_demand & 0xfffff0ff) | 0x00000100;
       }
     } else if (selector > (SERVO_PWM_CENTURE + (SIGNAL_STEP_SIZE * BOTH_DIFF_POINT)) && selector <= (SERVO_PWM_CENTURE + (SIGNAL_STEP_SIZE * (BOTH_DIFF_POINT + 1)))) {
       // Serial.println("Both Diffs");
       if (pulseWidth[1] >= High_PWM_Trigger) {
-        handle_signal(0x00000022);
+        // handle_signal(0x00000022);
+        html_demand = (html_demand & 0xffffff00) | 0x00000022;
       } else {
-        handle_signal(0x00000011);
+        // handle_signal(0x00000011);
+        html_demand = (html_demand & 0xffffff00) | 0x00000011;
       }
     }
   }
@@ -278,40 +293,70 @@ void loop() {
   if (client_connected && client) {
     if (client.connected() && client.available()) {
       char c = client.read();  // read a byte, then
-      // Serial.write(c);         // print it out the serial monitor
+      Serial.write(c);         // print it out the serial monitor
       currentLine += c;
       if (c == '\n') {  // if the byte is a newline character
         // if the current line is blank, you got two newline characters in a row.
         // that's the end of the client HTTP request, so send a response:
         if (currentLine.length() == 2) {
-          String temp_reading = ("Temp: " + String(temperatureRead()) + "°C");
+          String temp_reading = ("Temp: " + String(temperatureRead(), 2) + "°C");
           // Send HTML data
           client.clear();
           client.print( header );
           client.print( html_1 );
           client.print( Add_HTML_Button("Front Diff On", "FDIFFON", 1) );
-          client.print( Add_HTML_Button("Front Diff Off", "FDIFFOFF", 1) );
+          client.print( Add_HTML_Button("Front Diff Off", "FDIFFOFF", 2) );
+          client.print( Add_HTML_Button("Rear Diff On", "RDIFFON", 3) );
+          client.print( Add_HTML_Button("Rear Diff Off", "RDIFFOFF", 4) );
+          client.print( Add_HTML_Button("Transfer case High", "HGEAR", 5) );
+          client.print( Add_HTML_Button("Transfer case Low", "LGEAR", 6) );
           client.print(HTML_print(temp_reading));
           client.print( html_4 );
           client.stop();
           client_connected = false;
         } else {  // if you got a newline, then clear currentLine
+        if ( currentLine.indexOf("FDIFFON") > 0 )  { 
+          // Serial.println("#############\nEngaging front Diff\n#############");  
+          html_demand = (html_demand & 0xfffffff0) | 0x00000001;
+          // handle_signal(0x00000001);
+          currentLine = ""; // clear the message to prevent double triggers
+        }
+        else if ( currentLine.indexOf("FDIFFOFF") > 0 ) { 
+          // Serial.println("#############\nDissabeling front Diff\n#############"); 
+          html_demand = (html_demand & 0xfffffff0) | 0x00000002;
+          // handle_signal(0x00000002);
+          currentLine = ""; // clear the message to prevent double triggers
+        }
+
+        if ( currentLine.indexOf("RDIFFON") > 0 )  { 
+          // Serial.println("#############\nEngaging rear Diff\n#############");  
+          html_demand = (html_demand & 0xffffff0f) | 0x00000010;
+          // handle_signal(0x00000010);
+          currentLine = ""; // clear the message to prevent double triggers
+        }
+        else if ( currentLine.indexOf("RDIFFOFF") > 0 ) { 
+          // Serial.println("#############\nDissabeling rear Diff\n#############"); 
+          html_demand = (html_demand & 0xffffff0f) | 0x00000020;
+          // handle_signal(0x00000020);
+          currentLine = ""; // clear the message to prevent double triggers
+        }
+
+        if ( currentLine.indexOf("HGEAR") > 0 )  { 
+          // Serial.println("#############\nHigh gear\n#############");  
+          html_demand = (html_demand & 0xfffff0ff) | 0x00000100;
+          // handle_signal(0x00000100);
+          currentLine = ""; // clear the message to prevent double triggers
+        }
+        else if ( currentLine.indexOf("LGEAR") > 0 ) { 
+          // Serial.println("#############\nlow gear\n#############"); 
+          html_demand = (html_demand & 0xfffff0ff) | 0x00000200;
+          // handle_signal(0x00000200);
+          currentLine = ""; // clear the message to prevent double triggers
+        }
           currentLine = "";
         }
-      } else if (c != '\r') {  // Monitor for HTML return
-        // Serial.println("Command: " + currentLine);
-        
-        
-        if       ( currentLine.indexOf("FDIFFON") > 0 )  { 
-          Serial.println("#############\nEngaging front Diff\n#############");  
-          currentLine = ""; // clear the message to prevent double triggers
-        }
-        else if  ( currentLine.indexOf("FDIFFOFF") > 0 ) { 
-          Serial.println("#############\nDissabeling front Diff\n#############"); 
-          currentLine = ""; // clear the message to prevent double triggers
-        }
-        
-      }
+        last_demand = TIME_NOW_MS;
+      } 
     } else {
       // Serial.println("Client Closed.");
       client.stop();
@@ -323,6 +368,10 @@ void loop() {
   } else {
     // Serial.println(("Temp: " + std::to_string(temperatureRead()) + "°C").c_str());
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
+  if (TIME_NOW_MS - last_demand > HTML_DEMAND_WAIT_TIME){
+    handle_signal(html_demand);
+    html_demand = 0;
   }
   
 }
